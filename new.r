@@ -1,0 +1,102 @@
+#RSI + Moving Average (EMA 21 or 50)
+
+# Load libraries
+library(quantmod)
+library(TTR)
+library(data.table)
+library(rvest)
+
+
+#get symbols
+data_name_getter<-function(){
+  # URL of the Wikipedia page
+  url <- "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+  
+  # Read the HTML content
+  page <- read_html(url)
+  
+  # Extract the table containing the S&P 500 list
+  sp500_table <- page %>%
+    html_node(xpath = '//*[@id="constituents"]') %>%
+    html_table()
+  
+  sp500_stocks <- sp500_table$Symbol
+  
+  
+  sp500_stocks <- gsub("\\.", "-",sp500_stocks)
+  return(sp500_stocks)
+}
+sp500_stocks <- data_name_getter()
+
+#the date 
+date <- "2024-01-01"
+date2 <- "2025-06-03"
+#data getter and checker
+data_collecter <- function(i) {
+  # Get the stock symbol dynamically
+  symbol <- sp500_stocks[i]
+  
+  # Fetch stock data
+  stock_data <- getSymbols(symbol, from = date, to = date2, auto.assign = FALSE)
+  
+  # Convert to data.table
+  stock_data <- data.table(Date = index(stock_data), coredata(stock_data))
+  
+  # Define expected column suffixes
+  column_suffixes <- c("Open", "High", "Low", "Close", "Volume", "Adjusted")
+  
+  # Generate full column names based on the symbol
+  original_columns <- paste0(symbol, ".", column_suffixes)
+  
+  # Check which columns exist in the fetched data
+  existing_columns <- original_columns[original_columns %in% colnames(stock_data)]
+  
+  # Rename existing columns to remove the symbol prefix
+  setnames(stock_data, existing_columns, column_suffixes[original_columns %in% existing_columns])
+  
+  return(stock_data)
+}
+
+rsi <- function(stock_data, rsi_period = 14) {
+  # Compute RSI using the Close column
+  stock_data[, RSI := RSI(Close, n = rsi_period)]
+  
+  # Return Date and RSI values
+  return(tail(stock_data[, .(RSI)],1))
+}
+
+
+moving_average <- function(stock_data, n = 21) {
+  # Calculate n-day simple moving average (SMA)
+  stock_data[, SMA := SMA(Close, n = n)]
+  
+  # Return the latest SMA and Close
+  return(tail(stock_data[, .(Close, SMA)], 1))
+}
+
+
+results <- data.frame(Symbol = character(),
+                      RSI = numeric(),
+                      i = numeric(),
+                      ma = numeric(),
+                      stringsAsFactors = FALSE)
+
+i=250
+pb <- txtProgressBar(min = 0, max = 503, style = 3)
+while (i != 503) {
+  data <- data_collecter(i)
+  rsi_vaule <- rsi(data)
+  ma <- moving_average(data, n = 21)
+  # checking vaules and returning those that pass
+  if((rsi_vaule <= 30) & (ma$Close > ma$SMA)){
+    print(sp500_stocks[i])
+    results <- rbind(results, data.frame(Symbol = sp500_stocks[i],
+                                         RSI = rsi(data),
+                                         MA = moving_average(data),
+                                         i = i))
+  }
+  setTxtProgressBar(pb, i)
+  i=i+1
+}
+
+print(":finished")
