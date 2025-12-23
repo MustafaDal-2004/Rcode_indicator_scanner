@@ -11,13 +11,22 @@ The output of the script is a table of tickers that currently meet the buy crite
 This project requires a few R packages to work effectively, including quantmod for stock data retrieval, TTR for technical indicators, rvest for scraping the S&P 500 list, data.table and dplyr for data manipulation, and optionally tidyverse for easier data handling and visualization. Overall, this script provides a versatile foundation for technical analysis-based screening of the S&P 500, offering a starting point for further customization, strategy testing, and trading research.
 
 Please ensure these packages are installed into the R code terminal 
+
 install.packages(c(
+
   "rvest",      # for scraping Wikipedia
+  
   "quantmod",   # for financial data and indicators
+  
   "TTR",        # technical analysis indicators
+  
   "dplyr",      # data manipulation
+  
   "tidyverse",  # optional, recommended
+  
   "data.table", # optional, for faster data handling
+  
   "zoo"         # for rolling calculations (SMA, Bollinger)
+  
 ))
 
