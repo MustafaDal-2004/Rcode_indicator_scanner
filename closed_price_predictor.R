@@ -1,41 +1,80 @@
 # Load libraries
-library(tidyverse)
+library(quantmod)
+library(TTR)
+library(data.table)
+library(rvest)
+library(dplyr)
 
-# Example dataframe (replace with your actual data)
-data <- data.frame(Open = c(100, 102, 105, 107, 110),
-                   RSI = c(45, 55, 60, 50, 48),
-                   Close = c(101, 104, 108, 106, 111))
+# --- Get S&P 500 symbols ---
+get_sp500_symbols <- function(){
+  url <- "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+  page <- read_html(url)
+  table <- page %>%
+    html_node(xpath = '//*[@id="constituents"]') %>%
+    html_table()
+  symbols <- gsub("\\.", "-", table$Symbol)
+  return(symbols)
+}
 
-# Fit a linear model
-model <- lm(Close ~ Open + RSI, data = data)
+sp500_stocks <- get_sp500_symbols()
 
-# Summary of the model
-summary(model)
+# --- Data fetcher ---
+fetch_stock_data <- function(symbol, from_date="2024-01-01", to_date=Sys.Date()){
+  stock_data <- getSymbols(symbol, from = from_date, to = to_date, auto.assign = FALSE)
+  dt <- data.table(Date = index(stock_data), coredata(stock_data))
+  cols <- c("Open", "High", "Low", "Close", "Volume", "Adjusted")
+  setnames(dt, paste0(symbol, ".", cols)[paste0(symbol, ".", cols) %in% colnames(dt)], 
+           cols[paste0(symbol, ".", cols) %in% colnames(dt)])
+  return(dt)
+}
 
-# Predict close prices (for new data)
-new_data <- data.frame(Open = c(108, 111), RSI = c(52, 47))
-predict(model, new_data)
+# --- Indicators ---
+compute_rsi <- function(dt, n = 14) tail(RSI(dt$Close, n), 1)
+compute_macd <- function(dt) {
+  macd_vals <- MACD(dt$Close)
+  tail(macd_vals[, "macd"], 1)
+}
+compute_bollinger <- function(dt, n = 20, k = 2) {
+  sma <- zoo::rollmean(dt$Close, k = n, fill = NA, align = "right")
+  sd <- zoo::rollapply(dt$Close, width = n, FUN = sd, fill = NA, align = "right")
+  upper <- sma + k * sd
+  lower <- sma - k * sd
+  tail(cbind(upper, lower), 1)
+}
 
-import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
+# --- Predictive model for Close ---
+predict_close <- function(dt){
+  if(nrow(dt) < 5) return(NA)  # need minimum rows
+  df <- data.frame(Open = dt$Open, RSI = RSI(dt$Close))
+  df$Close <- dt$Close
+  model <- lm(Close ~ Open + RSI, data = df)
+  # Predict next Close using last Open and RSI
+  new_row <- data.frame(Open = tail(dt$Open, 1), RSI = tail(RSI(dt$Close), 1))
+  return(predict(model, new_row))
+}
 
-# Sample data
-data = pd.DataFrame({
-  'Open': [100, 102, 105, 107, 110],
-  'RSI': [45, 55, 60, 50, 48],
-  'Close': [101, 104, 108, 106, 111]
-})
+# --- Screener ---
+results <- data.frame(Symbol = character(),
+                      RSI = numeric(),
+                      MACD = numeric(),
+                      Predicted_Close = numeric(),
+                      stringsAsFactors = FALSE)
 
-# Features and target
-X = data[['Open', 'RSI']]
-y = data['Close']
+for(i in 1:length(sp500_stocks)){
+  dt <- fetch_stock_data(sp500_stocks[i])
+  rsi_val <- compute_rsi(dt)
+  macd_val <- compute_macd(dt)
+  pred_close <- predict_close(dt)
+  
+  # Example filter: RSI below 30 and MACD positive
+  if(!is.na(rsi_val) & rsi_val < 30 & macd_val > 0){
+    results <- rbind(results, data.frame(Symbol = sp500_stocks[i],
+                                         RSI = rsi_val,
+                                         MACD = macd_val,
+                                         Predicted_Close = round(pred_close, 2)))
+  }
+}
 
-# Train model
-model = LinearRegression()
-model.fit(X, y)
+print(results)
 
-# Predictions
-new_data = pd.DataFrame({'Open': [108, 111], 'RSI': [52, 47]})
-predictions = model.predict(new_data)
-print(predictions)
+
